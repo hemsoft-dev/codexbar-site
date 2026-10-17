@@ -29,11 +29,23 @@ def inline(text):
         codes.append("<code>" + html.escape(match.group(1), quote=False) + "</code>")
         return f"\x00{len(codes) - 1}\x00"
 
+    def restore(value):
+        return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], value)
+
+    def bold(escaped):
+        return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+
+    def link(match):
+        # Escape the destination exactly once, from the raw Markdown, so query strings keep a single `&amp;`.
+        href = html.escape(LINK_MAP.get(match.group(2), match.group(2)))
+        label = restore(bold(html.escape(match.group(1), quote=False)))
+        codes.append(f'<a href="{href}">{label}</a>')
+        return f"\x00{len(codes) - 1}\x00"
+
     text = re.sub(r"`([^`]+)`", keep, text)
-    text = html.escape(text, quote=False)
-    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
-    text = LINK.sub(lambda m: f'<a href="{html.escape(LINK_MAP.get(m.group(2), m.group(2)))}">{m.group(1)}</a>', text)
-    return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m.group(1))], text)
+    text = LINK.sub(link, text)
+    text = bold(html.escape(text, quote=False))
+    return restore(text)
 
 
 def convert(markdown):
@@ -89,16 +101,18 @@ def main():
     ios = pathlib.Path(sys.argv[1]).resolve()
     for name, target in TARGETS.items():
         sha, date = git(ios, "log", "-1", "--format=%H %cs", "--", name).split()
+        # Read the committed text, never the working tree, so the page always matches the cited commit.
+        source = git(ios, "show", f"{sha}:{name}") + "\n"
         note = [
             '<div class="source-note">',
             f'  <p>This page reproduces <a href="{REPO_URL}/blob/{sha}/{name}">{name}</a> from the codexbar-ios repository'
             f" (commit <code>{sha[:7]}</code>). Last updated: {date}.</p>",
         ]
-        mapped = [key for key in LINK_MAP if f"]({key})" in (ios / name).read_text()]
+        mapped = [key for key in LINK_MAP if f"]({key})" in source]
         if mapped:
             note.append("  <p>Links to " + " and ".join(mapped) + " point to the matching page on this site.</p>")
         note.append("</div>")
-        body = note + convert((ios / name).read_text())
+        body = note + convert(source)
         block = "\n".join(INDENT + line for line in body)
         page = target.read_text()
         pattern = re.compile(rf"(<!-- BEGIN SYNC {re.escape(name)} -->\n).*?(\s*<!-- END SYNC {re.escape(name)} -->)", re.S)
