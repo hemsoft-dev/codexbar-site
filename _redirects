@@ -1,0 +1,8 @@
+# Cloudflare Pages redirects. Redirects run before static assets, so these
+# paths stay unreachable even though the files are in the deployed tree.
+# Drafts (such as the pricing page) must not go live before they are promoted.
+/drafts/* / 302
+/drafts / 302
+/scripts/* / 302
+/scripts / 302
+/README.md / 302
